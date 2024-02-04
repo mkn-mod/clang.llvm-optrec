@@ -1,5 +1,5 @@
 /**
-Copyright (c) 2013, Philip Deegan.
+Copyright (c) 2024, Philip Deegan.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -43,21 +43,15 @@ public:
   auto update(maiken::Source const &s) {
     mkn::kul::Dir res{"res", this->buildDir()};
     mkn::kul::File inFile{s.in()};
-
     std::stringstream ss;
     ss << std::hex << std::hash<std::string>()(inFile.dir().real());
-
     mkn::kul::File yaml{ss.str() + "_" + inFile.name() + ".opt.yaml", res};
     std::string arg = s.args() + std::string{base0} + yaml.mini();
-
     return maiken::Source{s.in(), arg};
   }
   void hack() {
-
     auto const sourceMap = this->sourceMap();
-
     std::vector<std::pair<maiken::Source, bool>> sources;
-
     for (auto const &[k0, m0] : sourceMap) {
       for (auto const &[k1, v0] : m0) {
         for (auto const &sss : v0) {
@@ -72,18 +66,16 @@ public:
   }
 };
 
-class LLVM_OptRec_Module : public maiken::Module {
+// todo - better opt-viewer finding - eg
+// std::string viewer = "/usr/lib/llvm-14/share/opt-viewer/opt-viewer.py";
 
-  // std::string viewer = "/usr/lib/llvm-14/share/opt-viewer/opt-viewer.py";
+class LLVM_OptRec_Module : public maiken::Module {
 
 public:
   void init(maiken::Application &a, YAML::Node const &node)
       KTHROW(std::exception) override {
-    KLOG(INF) << a.buildDir();
     a.buildDir().mk();
-    mkn::kul::Dir res{"res", a.buildDir()};
-    KLOG(INF) << res;
-    KLOG(INF) << res.mk();
+    mkn::kul::Dir{"res", a.buildDir()}.mk();
   }
 
   void compile(maiken::Application &a, YAML::Node const &node)
@@ -101,21 +93,6 @@ public:
     p << res.mini() << "--output-dir" << hmtl.mini();
     KLOG(DBG) << p;
     p.start();
-  }
-
-protected:
-  static void VALIDATE_NODE(YAML::Node const &node) {
-    using namespace mkn::kul::yaml;
-    Validator({NodeValidator("args"), NodeValidator("paths"),
-               NodeValidator("style"), NodeValidator("types")})
-        .validate(node);
-  }
-
-  void run(maiken::Application &a, YAML::Node const &node)
-      KTHROW(std::exception) {
-    VALIDATE_NODE(node);
-
-    // mkn::kul::Process p("clang-format");
   }
 };
 

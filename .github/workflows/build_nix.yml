@@ -21,3 +21,5 @@ jobs:
         curl -Lo mkn https://github.com/mkn/mkn/releases/download/latest/mkn_nix
         chmod +x mkn
         KLOG=2 ./mkn clean build run -dtOa "-std=c++17 -fPIC"
+        KLOG=2 ./mkn build -d + -tOa "-fPIC -std=c++17" -p test -g 0
+        CXX=clang++ KLOG=2 ./mkn build -a "-fPIC -std=c++17" -p test run -Og 0
