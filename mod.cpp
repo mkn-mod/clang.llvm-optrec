@@ -74,12 +74,12 @@ class LLVM_OptRec_Module : public maiken::Module {
 public:
   void init(maiken::Application &a, YAML::Node const &node)
       KTHROW(std::exception) override {
-    a.buildDir().mk();
-    mkn::kul::Dir{"res", a.buildDir()}.mk();
   }
 
   void compile(maiken::Application &a, YAML::Node const &node)
       KTHROW(std::exception) override {
+    a.buildDir().mk();
+    mkn::kul::Dir{"res", a.buildDir()}.mk();
     reinterpret_cast<AppHack *>(&a)->hack();
   }
 
