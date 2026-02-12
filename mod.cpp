@@ -29,7 +29,6 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 #include <string_view>
-#include <unordered_set>
 
 #include "maiken/module/init.hpp"
 
@@ -73,8 +72,7 @@ class LLVM_OptRec_Module : public maiken::Module {
 
 public:
   void init(maiken::Application &a, YAML::Node const &node)
-      KTHROW(std::exception) override {
-  }
+      KTHROW(std::exception) override {}
 
   void compile(maiken::Application &a, YAML::Node const &node)
       KTHROW(std::exception) override {
@@ -89,7 +87,7 @@ public:
     mkn::kul::Dir hmtl{"res_html", a.buildDir()};
     hmtl.mk();
 
-    mkn::kul::Process p{"/usr/lib/llvm-14/share/opt-viewer/opt-viewer.py"};
+    mkn::kul::Process p{"/usr/share/opt-viewer/opt-viewer.py"};
     p << res.mini() << "--output-dir" << hmtl.mini();
     KLOG(DBG) << p;
     p.start();
@@ -98,10 +96,10 @@ public:
 
 } // namespace mkn::clang
 
-extern "C" KUL_PUBLISH maiken::Module *maiken_module_construct() {
+extern "C" MKN_KUL_PUBLISH maiken::Module *maiken_module_construct() {
   return new mkn ::clang ::LLVM_OptRec_Module;
 }
 
-extern "C" KUL_PUBLISH void maiken_module_destruct(maiken::Module *p) {
+extern "C" MKN_KUL_PUBLISH void maiken_module_destruct(maiken::Module *p) {
   delete p;
 }
