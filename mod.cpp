@@ -28,10 +28,10 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-#include <string_view>
-#include <unordered_set>
 
-#include "maiken/module/init.hpp"
+#include "maiken/module/init.hpp"  // IWYU pragma: keep
+
+#include <string_view>
 
 namespace mkn::clang {
 
@@ -39,8 +39,8 @@ class AppHack : public maiken::Application {
   std::string_view constexpr static base0 =
       " -fsave-optimization-record -foptimization-record-file=";
 
-public:
-  auto update(maiken::Source const &s) {
+ public:
+  auto update(maiken::Source const& s) {
     mkn::kul::Dir res{"res", this->buildDir()};
     mkn::kul::File inFile{s.in()};
     std::stringstream ss;
@@ -52,17 +52,16 @@ public:
   void hack() {
     auto const sourceMap = this->sourceMap();
     std::vector<std::pair<maiken::Source, bool>> sources;
-    for (auto const &[k0, m0] : sourceMap) {
-      for (auto const &[k1, v0] : m0) {
-        for (auto const &sss : v0) {
+    for (auto const& [k0, m0] : sourceMap) {
+      for (auto const& [k1, v0] : m0) {
+        for (auto const& sss : v0) {
           sources.emplace_back(std::make_pair(update(sss), false));
         }
       }
     }
 
     this->srcs = sources;
-    if (this->main_)
-      this->main_ = update(*this->main_);
+    if (this->main_) this->main_ = update(*this->main_);
   }
 };
 
@@ -70,21 +69,16 @@ public:
 // std::string viewer = "/usr/lib/llvm-14/share/opt-viewer/opt-viewer.py";
 
 class LLVM_OptRec_Module : public maiken::Module {
+ public:
+  void init(maiken::Application& a, YAML::Node const& node) KTHROW(std::exception) override {}
 
-public:
-  void init(maiken::Application &a, YAML::Node const &node)
-      KTHROW(std::exception) override {
-  }
-
-  void compile(maiken::Application &a, YAML::Node const &node)
-      KTHROW(std::exception) override {
+  void compile(maiken::Application& a, YAML::Node const& node) KTHROW(std::exception) override {
     a.buildDir().mk();
     mkn::kul::Dir{"res", a.buildDir()}.mk();
-    reinterpret_cast<AppHack *>(&a)->hack();
+    reinterpret_cast<AppHack*>(&a)->hack();
   }
 
-  void link(maiken::Application &a, YAML::Node const &node)
-      KTHROW(std::exception) override {
+  void link(maiken::Application& a, YAML::Node const& node) KTHROW(std::exception) override {
     mkn::kul::Dir res{"res", a.buildDir()};
     mkn::kul::Dir hmtl{"res_html", a.buildDir()};
     hmtl.mk();
@@ -96,12 +90,10 @@ public:
   }
 };
 
-} // namespace mkn::clang
+}  // namespace mkn::clang
 
-extern "C" KUL_PUBLISH maiken::Module *maiken_module_construct() {
+extern "C" KUL_PUBLISH maiken::Module* maiken_module_construct() {
   return new mkn ::clang ::LLVM_OptRec_Module;
 }
 
-extern "C" KUL_PUBLISH void maiken_module_destruct(maiken::Module *p) {
-  delete p;
-}
+extern "C" KUL_PUBLISH void maiken_module_destruct(maiken::Module* p) { delete p; }
