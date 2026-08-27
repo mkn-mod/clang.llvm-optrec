@@ -34,17 +34,39 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "mkn/kul/os.hpp"
 #include "mkn/kul/proc.hpp"
 
+#include <cctype>
 #include <functional>
 #include <sstream>
 
 namespace mkn::clang {
 
 class LLVM_OptRec_Module : public mkn::mod::Module {
+  // Derives opt-viewer.py's path from the compiler's own resource dir, e.g.
+  // clang --print-resource-dir -> /usr/lib/llvm-22/lib/clang/22, three levels
+  // up is the install prefix, which ships share/opt-viewer/opt-viewer.py.
+  static std::string guess_viewer_bin(std::string const& compiler) {
+    try {
+      mkn::kul::Process p{compiler};
+      mkn::kul::ProcessCapture pc{p};
+      p << "-print-resource-dir";
+      p.start();
+
+      std::string resourceDir = pc.outs();
+      while (!resourceDir.empty() && std::isspace(static_cast<unsigned char>(resourceDir.back())))
+        resourceDir.pop_back();
+      if (resourceDir.empty()) return "";
+
+      mkn::kul::Dir const prefix = mkn::kul::Dir(resourceDir).parent().parent().parent();
+      mkn::kul::File const guess{"opt-viewer.py",
+                                  mkn::kul::Dir{"opt-viewer", mkn::kul::Dir{"share", prefix}}};
+      return guess ? guess.real() : "";
+    } catch (...) {
+      return "";
+    }
+  }
+
  public:
   void link(mkn::mod::Context& ctx, YAML::Node const& node) KTHROW(std::exception) override {
-    std::string const viewer_bin =
-        node["bin"] ? node["bin"].Scalar()
-                    : mkn::kul::env::GET("OPT_VIEWER", "/usr/share/opt-viewer/opt-viewer.py");
     std::string const buildDir = ctx.state().get("buildDir", ".");
 
     mkn::kul::Dir const res{"res", buildDir};
@@ -52,6 +74,7 @@ class LLVM_OptRec_Module : public mkn::mod::Module {
     mkn::kul::Dir const tmp{"tmp", buildDir};
     tmp.mk();
 
+    std::string compiler;
     ctx.per_compiler_command([&](mkn::mod::CompileCommand const& cmd) {
       mkn::kul::File const inFile{cmd.in};
       std::stringstream ss;
@@ -62,7 +85,7 @@ class LLVM_OptRec_Module : public mkn::mod::Module {
 
       std::string const full = ctx.compileCommandFor(cmd.in);
       auto const firstSpace = full.find(' ');
-      std::string const compiler = full.substr(0, firstSpace);
+      compiler = full.substr(0, firstSpace);
       std::string const flags = full.substr(firstSpace + 1, full.rfind(" -o") - (firstSpace + 1));
 
       mkn::kul::Process p{compiler};
@@ -72,6 +95,19 @@ class LLVM_OptRec_Module : public mkn::mod::Module {
       KLOG(DBG) << p;
       p.start();
     });
+
+    std::string const viewer_bin = [&]() -> std::string {
+      if (node["bin"]) return node["bin"].Scalar();
+      if (std::string const env = mkn::kul::env::GET("OPT_VIEWER"); !env.empty()) return env;
+      if (std::string const guess = guess_viewer_bin(compiler.empty() ? "clang" : compiler);
+          !guess.empty())
+        return guess;
+      return "/usr/share/opt-viewer/opt-viewer.py";
+    }();
+
+    if (!mkn::kul::File(viewer_bin))
+      KEXCEPT(mkn::kul::Exception, "opt-viewer.py not found at \"" + viewer_bin +
+                                        "\", set via the \"bin\" option or $OPT_VIEWER");
 
     mkn::kul::Dir const html{"res_html", buildDir};
     html.mk();
