@@ -28,63 +28,56 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+#include "mkn/mod/init.hpp"  // IWYU pragma: keep
 
-#include "maiken/module/init.hpp"  // IWYU pragma: keep
+#include "mkn/kul/log.hpp"
+#include "mkn/kul/os.hpp"
+#include "mkn/kul/proc.hpp"
 
-#include <string_view>
+#include <functional>
+#include <sstream>
 
 namespace mkn::clang {
 
-class AppHack : public maiken::Application {
-  std::string_view constexpr static base0 =
-      " -fsave-optimization-record -foptimization-record-file=";
-
+class LLVM_OptRec_Module : public mkn::mod::Module {
  public:
-  auto update(maiken::Source const& s) {
-    mkn::kul::Dir res{"res", this->buildDir()};
-    mkn::kul::File inFile{s.in()};
-    std::stringstream ss;
-    ss << std::hex << std::hash<std::string>()(inFile.dir().real());
-    mkn::kul::File yaml{ss.str() + "_" + inFile.name() + ".opt.yaml", res};
-    std::string arg = s.args() + std::string{base0} + yaml.mini();
-    return maiken::Source{s.in(), arg};
-  }
-  void hack() {
-    auto const sourceMap = this->sourceMap();
-    std::vector<std::pair<maiken::Source, bool>> sources;
-    for (auto const& [k0, m0] : sourceMap) {
-      for (auto const& [k1, v0] : m0) {
-        for (auto const& sss : v0) {
-          sources.emplace_back(std::make_pair(update(sss), false));
-        }
-      }
-    }
+  void link(mkn::mod::Context& ctx, YAML::Node const& node) KTHROW(std::exception) override {
+    std::string const viewer_bin =
+        node["bin"] ? node["bin"].Scalar()
+                    : mkn::kul::env::GET("OPT_VIEWER", "/usr/share/opt-viewer/opt-viewer.py");
+    std::string const buildDir = ctx.state().get("buildDir", ".");
 
-    this->srcs = sources;
-    if (this->main_) this->main_ = update(*this->main_);
-  }
-};
+    mkn::kul::Dir const res{"res", buildDir};
+    res.mk();
+    mkn::kul::Dir const tmp{"tmp", buildDir};
+    tmp.mk();
 
-// todo - better opt-viewer finding - eg
-// std::string viewer = "/usr/lib/llvm-14/share/opt-viewer/opt-viewer.py";
+    ctx.per_compiler_command([&](mkn::mod::CompileCommand const& cmd) {
+      mkn::kul::File const inFile{cmd.in};
+      std::stringstream ss;
+      ss << std::hex << std::hash<std::string>()(inFile.dir().real());
+      std::string const base = ss.str() + "_" + inFile.name();
+      mkn::kul::File const record{base + ".opt.yaml", res};
+      mkn::kul::File const obj{base + ".o", tmp};
 
-class LLVM_OptRec_Module : public maiken::Module {
- public:
-  void init(maiken::Application& a, YAML::Node const& node) KTHROW(std::exception) override {}
+      std::string const full = ctx.compileCommandFor(cmd.in);
+      auto const firstSpace = full.find(' ');
+      std::string const compiler = full.substr(0, firstSpace);
+      std::string const flags = full.substr(firstSpace + 1, full.rfind(" -o") - (firstSpace + 1));
 
-  void compile(maiken::Application& a, YAML::Node const& node) KTHROW(std::exception) override {
-    a.buildDir().mk();
-    mkn::kul::Dir{"res", a.buildDir()}.mk();
-    reinterpret_cast<AppHack*>(&a)->hack();
-  }
+      mkn::kul::Process p{compiler};
+      for (std::string const& a : mkn::kul::cli::asArgs(flags)) p << a;
+      p << "-fsave-optimization-record" << ("-foptimization-record-file=" + record.mini());
+      p << "-o" << obj.mini() << "-c" << cmd.in;
+      KLOG(DBG) << p;
+      p.start();
+    });
 
-  void link(maiken::Application& a, YAML::Node const& node) KTHROW(std::exception) override {
-    mkn::kul::Dir res{"res", a.buildDir()};
-    mkn::kul::Dir hmtl{"res_html", a.buildDir()};
-    hmtl.mk();
+    mkn::kul::Dir const html{"res_html", buildDir};
+    html.mk();
 
-    mkn::kul::Process p{"/usr/share/opt-viewer/opt-viewer.py"};
-    p << res.mini() << "--output-dir" << hmtl.mini();
+    mkn::kul::Process p{viewer_bin};
+    p << res.mini() << "--output-dir" << html.mini();
     KLOG(DBG) << p;
     p.start();
   }
@@ -92,8 +85,8 @@ class LLVM_OptRec_Module : public maiken::Module {
 
 }  // namespace mkn::clang
 
-extern "C" MKN_KUL_PUBLISH maiken::Module* maiken_module_construct() {
+extern "C" MKN_KUL_PUBLISH mkn::mod::Module* maiken_module_construct() {
   return new mkn ::clang ::LLVM_OptRec_Module;
 }
 
-extern "C" MKN_KUL_PUBLISH void maiken_module_destruct(maiken::Module* p) { delete p; }
+extern "C" MKN_KUL_PUBLISH void maiken_module_destruct(mkn::mod::Module* p) { delete p; }
