@@ -28,80 +28,101 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-#include <string_view>
-#include <unordered_set>
+#include "mkn/mod/init.hpp"  // IWYU pragma: keep
 
-#include "maiken/module/init.hpp"
+#include "mkn/kul/log.hpp"
+#include "mkn/kul/os.hpp"
+#include "mkn/kul/proc.hpp"
+
+#include <cctype>
+#include <functional>
+#include <sstream>
 
 namespace mkn::clang {
 
-class AppHack : public maiken::Application {
-  std::string_view constexpr static base0 =
-      " -fsave-optimization-record -foptimization-record-file=";
+class LLVM_OptRec_Module : public mkn::mod::Module {
+  // Derives opt-viewer.py's path from the compiler's own resource dir, e.g.
+  // clang --print-resource-dir -> /usr/lib/llvm-22/lib/clang/22, three levels
+  // up is the install prefix, which ships share/opt-viewer/opt-viewer.py.
+  static std::string guess_viewer_bin(std::string const& compiler) {
+    try {
+      mkn::kul::Process p{compiler};
+      mkn::kul::ProcessCapture pc{p};
+      p << "-print-resource-dir";
+      p.start();
 
-public:
-  auto update(maiken::Source const &s) {
-    mkn::kul::Dir res{"res", this->buildDir()};
-    mkn::kul::File inFile{s.in()};
-    std::stringstream ss;
-    ss << std::hex << std::hash<std::string>()(inFile.dir().real());
-    mkn::kul::File yaml{ss.str() + "_" + inFile.name() + ".opt.yaml", res};
-    std::string arg = s.args() + std::string{base0} + yaml.mini();
-    return maiken::Source{s.in(), arg};
-  }
-  void hack() {
-    auto const sourceMap = this->sourceMap();
-    std::vector<std::pair<maiken::Source, bool>> sources;
-    for (auto const &[k0, m0] : sourceMap) {
-      for (auto const &[k1, v0] : m0) {
-        for (auto const &sss : v0) {
-          sources.emplace_back(std::make_pair(update(sss), false));
-        }
-      }
+      std::string resourceDir = pc.outs();
+      while (!resourceDir.empty() && std::isspace(static_cast<unsigned char>(resourceDir.back())))
+        resourceDir.pop_back();
+      if (resourceDir.empty()) return "";
+
+      mkn::kul::Dir const prefix = mkn::kul::Dir(resourceDir).parent().parent().parent();
+      mkn::kul::File const guess{"opt-viewer.py",
+                                  mkn::kul::Dir{"opt-viewer", mkn::kul::Dir{"share", prefix}}};
+      return guess ? guess.real() : "";
+    } catch (...) {
+      return "";
     }
-
-    this->srcs = sources;
-    if (this->main_)
-      this->main_ = update(*this->main_);
-  }
-};
-
-// todo - better opt-viewer finding - eg
-// std::string viewer = "/usr/lib/llvm-14/share/opt-viewer/opt-viewer.py";
-
-class LLVM_OptRec_Module : public maiken::Module {
-
-public:
-  void init(maiken::Application &a, YAML::Node const &node)
-      KTHROW(std::exception) override {
   }
 
-  void compile(maiken::Application &a, YAML::Node const &node)
-      KTHROW(std::exception) override {
-    a.buildDir().mk();
-    mkn::kul::Dir{"res", a.buildDir()}.mk();
-    reinterpret_cast<AppHack *>(&a)->hack();
-  }
+ public:
+  void link(mkn::mod::Context& ctx, YAML::Node const& node) KTHROW(std::exception) override {
+    std::string const buildDir = ctx.state().get("buildDir", ".");
 
-  void link(maiken::Application &a, YAML::Node const &node)
-      KTHROW(std::exception) override {
-    mkn::kul::Dir res{"res", a.buildDir()};
-    mkn::kul::Dir hmtl{"res_html", a.buildDir()};
-    hmtl.mk();
+    mkn::kul::Dir const res{"res", buildDir};
+    res.mk();
+    mkn::kul::Dir const tmp{"tmp", buildDir};
+    tmp.mk();
 
-    mkn::kul::Process p{"/usr/lib/llvm-14/share/opt-viewer/opt-viewer.py"};
-    p << res.mini() << "--output-dir" << hmtl.mini();
+    std::string compiler;
+    ctx.per_compiler_command([&](mkn::mod::CompileCommand const& cmd) {
+      mkn::kul::File const inFile{cmd.in};
+      std::stringstream ss;
+      ss << std::hex << std::hash<std::string>()(inFile.dir().real());
+      std::string const base = ss.str() + "_" + inFile.name();
+      mkn::kul::File const record{base + ".opt.yaml", res};
+      mkn::kul::File const obj{base + ".o", tmp};
+
+      std::string const full = ctx.compileCommandFor(cmd.in);
+      auto const firstSpace = full.find(' ');
+      compiler = full.substr(0, firstSpace);
+      std::string const flags = full.substr(firstSpace + 1, full.rfind(" -o") - (firstSpace + 1));
+
+      mkn::kul::Process p{compiler};
+      for (std::string const& a : mkn::kul::cli::asArgs(flags)) p << a;
+      p << "-fsave-optimization-record" << ("-foptimization-record-file=" + record.mini());
+      p << "-o" << obj.mini() << "-c" << cmd.in;
+      KLOG(DBG) << p;
+      p.start();
+    });
+
+    std::string const viewer_bin = [&]() -> std::string {
+      if (node["bin"]) return node["bin"].Scalar();
+      if (std::string const env = mkn::kul::env::GET("OPT_VIEWER"); !env.empty()) return env;
+      if (std::string const guess = guess_viewer_bin(compiler.empty() ? "clang" : compiler);
+          !guess.empty())
+        return guess;
+      return "/usr/share/opt-viewer/opt-viewer.py";
+    }();
+
+    if (!mkn::kul::File(viewer_bin))
+      KEXCEPT(mkn::kul::Exception, "opt-viewer.py not found at \"" + viewer_bin +
+                                        "\", set via the \"bin\" option or $OPT_VIEWER");
+
+    mkn::kul::Dir const html{"res_html", buildDir};
+    html.mk();
+
+    mkn::kul::Process p{viewer_bin};
+    p << res.mini() << "--output-dir" << html.mini();
     KLOG(DBG) << p;
     p.start();
   }
 };
 
-} // namespace mkn::clang
+}  // namespace mkn::clang
 
-extern "C" KUL_PUBLISH maiken::Module *maiken_module_construct() {
+extern "C" MKN_KUL_PUBLISH mkn::mod::Module* maiken_module_construct() {
   return new mkn ::clang ::LLVM_OptRec_Module;
 }
 
-extern "C" KUL_PUBLISH void maiken_module_destruct(maiken::Module *p) {
-  delete p;
-}
+extern "C" MKN_KUL_PUBLISH void maiken_module_destruct(mkn::mod::Module* p) { delete p; }
