@@ -1,5 +1,5 @@
 
-# clang.llvm-optrec
+# llvm.opt
 
 ** LLVM Optimization Record module **
 
@@ -15,7 +15,7 @@ HTML report in `bin/$profile/res_html`.
 
 ```yaml
 mod:
-- name: clang.llvm-optrec
+- name: llvm.opt
   link:
     bin: $str  #[optional, default="/usr/share/opt-viewer/opt-viewer.py", see: $OPT_VIEWER]
 ```
