@@ -1,5 +1,5 @@
 
-name: clang.llvm-optrec
+name: llvm.opt
 version: master
 
 parent: base
@@ -18,5 +18,5 @@ profile:
 
 - name: test
   parent: base
-  mod: clang.llvm-optrec
+  mod: llvm.opt
   src: mod.cpp
